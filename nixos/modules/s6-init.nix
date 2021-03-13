@@ -4,6 +4,7 @@ with lib;
 
 let
   cfg = config.services.s6-init;
+  dump = import ./dump.nix;
 
 in {
   options = {
@@ -91,27 +92,29 @@ in {
             ${pkgs.execline}/bin/exec -a s6-log                            # name it 's6-log' instead of /nix/store/...
             ${pkgs.s6}/bin/s6-log -v -b -l 1024 T n30 s10000000 ${cfg.syslogDir}
           '';
- 
+
           date-service = "date-service";
           date-serviceDir = "${cfg.serviceDir}/${date-service}";
-          dated = pkgs.writeScript "dated" ''
+          date-run = pkgs.writeScript "${date-service}-run" ''
             #!/bin/sh
             
-            while ${pkgs.coreutils}/bin/sleep 5 ; do ${pkgs.coreutils}/bin/date >> /var/log/date-log; done
+            while ${pkgs.coreutils}/bin/sleep 5 ; do ${pkgs.coreutils}/bin/date | \
+                  ${pkgs.coreutils}/bin/tee -a /var/log/date-log; done
           '';
-
+ 
           getty-service = "getty-service";
           getty-serviceDir = "${cfg.serviceDir}/${getty-service}";
-          gettyd = pkgs.writeScript "gettyd" ''
+          getty-run = pkgs.writeScript "gettyd" ''
             #!/bin/sh
             
             ${pkgs.utillinux}/bin/agetty -a root tty8
           '';
+
           
       in
         ''
           set -x
-          echo Starting s6-init in between ...
+          echo Starting s6-init ...
           # Create a s6-service scan proces that can start its own logger
           PATH=${pkgs.coreutils}/bin
           mkdir -p ${cfg.serviceDir}
@@ -119,7 +122,6 @@ in {
       
           # Make the logger service
           mkdir -p ${logger-serviceDir}
-          # hacky way of making a service definition
           cp ${logger} ${logger-serviceDir}/run
           echo "longrun" > ${logger-serviceDir}/type
 
@@ -131,12 +133,12 @@ in {
           mkdir -p ${date-serviceDir}
           cp ${dated} ${date-serviceDir}/run
           echo "longrun" > ${date-serviceDir}/type
-
+          
           ## Make a getty-service
           mkdir -p ${getty-serviceDir}
           cp ${gettyd} ${getty-serviceDir}/run
           echo "longrun" > ${getty-serviceDir}/type
-          
+
           # create the initial 'compiled' directory
           # s6-rc-compile does not like it when the directory exists, so use mktemp -u unsafe
           CompiledDir=`mktemp -d -u "/tmp/rc6-compiled-XXXXXX"`
@@ -171,24 +173,15 @@ in {
         '');
     in {
 
+      # set to "$s6-init" to start with S6 instead of systemd!
       boot.systemdExecutable = "${s6-init}";
-      #boot.systemdExecutable = "sleep 60";
-      #"bash -x " + pkgs.writeScript "bash-init"
-      #''
-      #  #!/bin/sh
-      #  # run systemd at a different pid than pid 1
-      #  set -x
-      #  systemd &
-      #  while [ true ] do
-      #    wait
-      #  done
-      #  sleep 999999999
-      #'';
     
-      boot.postBootCommands =       ''
-      #  ${s6-init} &
-      '';
-      
+      boot.postBootCommands =
+        #''
+        #  #  ${s6-init} &
+        #'';
+        builtins.trace (builtins.attrNames config.systemd.services) "";
+            
       #system.activationScripts = {
         #  s6-svsan = {
           #    deps = [];
