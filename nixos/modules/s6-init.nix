@@ -1,10 +1,13 @@
 { config, lib, pkgs, ...} :
 
 with lib;
+with builtins;
 
 let
   cfg = config.services.s6-init;
   dump = import ./dump.nix;
+  systemd = import ./systemd.nix { pkgs =  pkgs; };
+
 
 in {
   options = {
@@ -85,7 +88,7 @@ in {
           logger-service = rec {
             name = "syslog-logger-service";
             type = "longrun";
-            run = pkgs.writeScript "${name}-run" ''
+            run = ''
               #!${pkgs.execline}/bin/execlineb -P
 
               # TODO: change user to something less root-y
@@ -98,7 +101,7 @@ in {
           date-service =  rec {
             name = "date-service";
             type = "longrun";
-            run = pkgs.writeScript "${name}-run" ''
+            run = ''
               #!/bin/sh
 
               while ${pkgs.coreutils}/bin/sleep 5 ; do ${pkgs.coreutils}/bin/date | \
@@ -109,25 +112,33 @@ in {
           getty-service = rec {
             name = "getty-service";
             type = "longrun";
-            run = pkgs.writeScript "${name}-run" ''
+            run = ''
               #!/bin/sh
 
               ${pkgs.utillinux}/bin/agetty -a root tty8
             '';
           };
 
+          console-getty = systemd.convert-service "console-getty" config.systemd.services.console-getty;
+
+          startup-services = [ logger-service date-service getty-service console-getty ];
+
           make-service = svc:
           let
             dir = "${cfg.serviceDir}/${svc.name}";
           in
           ''
-            mkdir -p           ${dir}
-            cp   ${svc.run}    ${dir}/run
+            # Make service ${svc.name}
+            mkdir -p ${dir}
+            cat << 'EOF-XYZZY' > ${dir}/run
+            ${svc.run}
+            EOF-XYZZY
+            chmod +x ${dir}/run
             echo ${svc.type} > ${dir}/type
           '';
 
           make-services = servs:
-            builtins.concatStringsSep "\n" (builtins.map make-service servs);
+          builtins.concatStringsSep "\n" (builtins.map make-service servs);
 
       in
         ''
@@ -144,13 +155,8 @@ in {
           mkfifo ${cfg.fifo}
 
         '' +
-
-        #(builtins.trace
-        (make-services [ logger-service getty-service date-service ])
-        #"foobar")
-        +
-
-        ''
+        (make-services startup-services)
+        + ''
           # create the initial 'compiled' directory
           # s6-rc-compile does not like it when the directory exists, so use mktemp -u unsafe
           CompiledDir=`mktemp -d -u "/tmp/rc6-compiled-XXXXXX"`
@@ -163,7 +169,7 @@ in {
              ${pkgs.s6-rc}/bin/s6-rc-init -c "$CompiledDir" -l "${cfg.lifeDir}" "${cfg.scanDir}"
 
              # TODO: add 'all-bundle'
-             ${pkgs.s6-rc}/bin/s6-rc -v 2 -l "${cfg.lifeDir}" change "${logger-service.name}" "${date-service.name}" "${getty-service.name}"
+             ${pkgs.s6-rc}/bin/s6-rc -v 2 -l "${cfg.lifeDir}" change ${concatStringsSep " " (map (x: x.name) startup-services)}
           ) &
 
           # Run the svscan service in the background
@@ -180,19 +186,9 @@ in {
       boot.systemdExecutable = "${s6-init}";
 
       boot.postBootCommands =
-        #''
-        #  #  ${s6-init} &
-        #'';
-        builtins.trace (builtins.attrNames config.systemd.services) "";
-
-      #system.activationScripts = {
-        #  s6-svsan = {
-          #    deps = [];
-          #    text = XYZZY
-          #
-          #
-          #  };
-          #};
+        (trace (dump( config.systemd.services.console-getty.serviceConfig))
+        ""
+        );
 
       # The group name that all s6-logs run under.
       users.groups."s6" = {};
