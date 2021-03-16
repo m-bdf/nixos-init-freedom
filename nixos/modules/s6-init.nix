@@ -142,6 +142,7 @@ in {
 
       in
         ''
+          #!/bin/sh
           set -x
           echo Starting s6-init ...
           # Create a s6-service scan process that can start its own logger
@@ -174,7 +175,7 @@ in {
 
           # Run the svscan service in the background
           echo Starting s6-svscan on ${cfg.scanDir}
-          ${scanner}
+          exec ${scanner}
 
           # Keep running until shutdown.
           # The end
