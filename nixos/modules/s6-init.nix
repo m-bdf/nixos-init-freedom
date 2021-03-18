@@ -104,8 +104,19 @@ in {
             run = ''
               #!/bin/sh
 
-              while ${pkgs.coreutils}/bin/sleep 5 ; do ${pkgs.coreutils}/bin/date | \
-              ${pkgs.coreutils}/bin/tee -a /var/log/date-log; done
+              while ${pkgs.coreutils}/bin/sleep 5 ; do ${pkgs.coreutils}/bin/date ; done
+            '';
+          };
+
+          log-tailer = rec {
+            name = "log-tailer";
+            type = "longrun";
+            run = ''
+              #!/bin/sh
+
+              ${pkgs.s6}/bin/s6-setsid \
+              ${pkgs.execline}/bin/exec -a log-tail \
+              ${pkgs.utillinux}/bin/agetty -a root -l ${pkgs.coreutils}/bin/tail -o '-F /var/log/s6/syslog/current' tty2 linux
             '';
           };
 
@@ -115,20 +126,27 @@ in {
             run = ''
               #!/bin/sh
 
-              ${pkgs.utillinux}/bin/agetty -a root tty8
+              ${pkgs.s6}/bin/s6-setsid \
+              ${pkgs.utillinux}/bin/agetty -a root tty8 linux
             '';
           };
 
-          console-getty = systemd.convert-service "console-getty" config.systemd.services.console-getty;
+          #console-getty = systemd.convert-service "console-getty" config.systemd.services.console-getty;
+          #haveged = systemd.convert-service "haveged" config.systemd.services.haveged;
 
-          startup-services = [ logger-service date-service getty-service console-getty ];
+          # convert the specified services into s6-services
+          systemd-imports = [ "console-getty" "haveged" "unbound" ];
+          systemd-services = map (svc-name: systemd.convert-service svc-name config.systemd.services.${svc-name})
+            (filter (svc-name: elem svc-name systemd-imports)  (attrNames config.systemd.services));
+
+          startup-services = [ logger-service log-tailer date-service getty-service ] ++ systemd-services;
 
           make-service = svc:
           let
             dir = "${cfg.serviceDir}/${svc.name}";
           in
           ''
-            # Make service ${svc.name}
+            # Make service ${trace (dump svc) svc.name}
             mkdir -p ${dir}
             cat << 'EOF-XYZZY' > ${dir}/run
             ${svc.run}
@@ -187,9 +205,10 @@ in {
       boot.systemdExecutable = "${s6-init}";
 
       boot.postBootCommands =
-        (trace (dump( config.systemd.services.console-getty.serviceConfig))
+        #(trace (dump( config.systemd.services.unbound.preStart))
         ""
-        );
+        #)
+        ;
 
       # The group name that all s6-logs run under.
       users.groups."s6" = {};
