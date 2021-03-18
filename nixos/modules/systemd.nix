@@ -57,6 +57,12 @@ rec {
   # if there is a preStart, create a dependency on it
   (if hasAttr "preStart" svc then { preStart = svc.preStart; } else {});
 
+  make-finish = name: svc:
+  # if there is an ExecPostStop command, capture that.
+  # TODO: filter special characters
+  # TODO: fetch other ExecStop commands too
+  (if hasAttr "ExecStopPost" svc.serviceConfig then { finish = svc.serviceConfig.ExecStopPost; } else {});
+
   # make-prestart = name: svc:
   # # If there is a preStart, create a new one-shot service to set it up
   # {
@@ -78,7 +84,7 @@ rec {
     make-type     name svc //
     make-start    name svc //
     make-prestart name svc //
-    #make-finish   name svc //
+    make-finish   name svc //
     {};
   in
   # only longrun for now
@@ -98,5 +104,15 @@ rec {
       exec ${serv.start}
     '';
     # TODO: ps-name:  ${if hasAttr "ps-name" then "${pkgs.execline}/bin/exec -a ${serv.ps-name}"}
-  };
+  } //
+  (if hasAttr "finish" serv then
+  {
+    finish = ''
+      #!/bin/sh
+
+      ${serv.finish}
+    '';
+  } else {});
+
+
 }

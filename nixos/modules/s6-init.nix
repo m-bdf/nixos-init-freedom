@@ -153,7 +153,16 @@ in {
             EOF-XYZZY
             chmod +x ${dir}/run
             echo ${svc.type} > ${dir}/type
-          '';
+          '' +
+
+          # add a finish script
+          (if hasAttr "finish" svc then
+          ''
+            cat << 'EOF-XYZZY' > ${dir}/finish
+            ${svc.finish}
+            EOF-XYZZY
+          ''
+          else "");
 
           make-services = servs:
           builtins.concatStringsSep "\n" (builtins.map make-service servs);
