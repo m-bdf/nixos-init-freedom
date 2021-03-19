@@ -135,18 +135,49 @@ in {
           #haveged = systemd.convert-service "haveged" config.systemd.services.haveged;
 
           # convert the specified services into s6-services
-          systemd-imports = [ "console-getty" "haveged" "unbound" ];
+          #systemd-imports = [ "console-getty" "haveged" "unbound" "sshd" "network-setup" ];
+          systemd-imports = [                                             "network-setup" ];
+          systemd-rejects =
+            [ "dbus" "nix-daemon" "polkit" "systemd-backlight@" "systemd-fsck@"
+              "halt.target" "shutdown.target" "sleep.target"
+            ];
           systemd-services = map (svc-name: systemd.convert-service svc-name config.systemd.services.${svc-name})
-            (filter (svc-name: elem svc-name systemd-imports)  (attrNames config.systemd.services));
+            (filter (svc-name:   elem svc-name systemd-imports)
+            (filter (svc-name: ! elem svc-name systemd-rejects) (attrNames config.systemd.services
+            )
+            ));
 
-          startup-services = [ logger-service log-tailer date-service getty-service ] ++ systemd-services;
+            startup-services = [ logger-service log-tailer date-service getty-service ] ++
+            #(trace (dump systemd-services)
+            systemd-services
+            #)
+            ;
 
           make-service = svc:
+            if svc.type == "longrun" then
+              make-longrun svc
+            else make-oneshot svc;
+
+          make-oneshot = svc:
           let
             dir = "${cfg.serviceDir}/${svc.name}";
           in
           ''
-            # Make service ${trace (dump svc) svc.name}
+            # Make oneshot ${svc.name}
+            mkdir -p ${dir}
+            cat << 'EOF-XYZZY' > ${dir}/up
+            ${svc.up}
+            EOF-XYZZY
+            chmod +x ${dir}/up
+            echo ${svc.type} > ${dir}/type
+          '';
+
+          make-longrun = svc:
+          let
+            dir = "${cfg.serviceDir}/${svc.name}";
+          in
+          ''
+            # Make service ${svc.name}
             mkdir -p ${dir}
             cat << 'EOF-XYZZY' > ${dir}/run
             ${svc.run}
@@ -154,7 +185,6 @@ in {
             chmod +x ${dir}/run
             echo ${svc.type} > ${dir}/type
           '' +
-
           # add a finish script
           (if hasAttr "finish" svc then
           ''

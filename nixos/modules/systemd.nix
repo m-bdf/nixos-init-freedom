@@ -12,9 +12,9 @@ rec {
 
   fetch-type = name: svc:
   let
-    Type = if hasAttr "Type" svc then svc.Type else                     # take Type if it specfied
-           if hasAttr "BusName" svc then "dbus" else                    # when there is no BusName ...
-           if hasAttr "ExecStart" svc.serviceConfig then "simple" else  # ... default to simple when ExecStart present
+    Type = if hasAttr "Type" svc.serviceConfig then svc.serviceConfig.Type else # take Type if it specfied
+           if hasAttr "BusName" svc then "dbus" else                            # when there is no BusName ...
+           if hasAttr "ExecStart" svc.serviceConfig then "simple" else          # ... default to simple when ExecStart present
            "oneshot"; # default when neither Type nor Execstart are specified (and neither BusName)
   in
   if elem Type [ "simple" "exec" "forking" ]
@@ -23,14 +23,14 @@ rec {
     inherit Type;      # keep for later to detemine other flags
     type =  "longrun"; # s6-type
   }
-  #else (if elem Type [ "oneshot" ]
-  #then
-  #{
-  #  inherit Type;
-  #  type = "oneshot";
-  #}
+  else (if elem Type [ "oneshot" ]
+  then
+  {
+    inherit Type;
+    type = "oneshot";
+  }
   else throw ("cannot process systemd sevice of type [${Type}] for [${name}]")
-  #)
+  )
   ;
 
 
@@ -93,13 +93,58 @@ rec {
   convert-service = name: svc:
   let serv =
     (fetch-type     name svc) //
-    (fetch-env      name (trace (dump svc.environment) svc)) //
+    (fetch-env      name (trace svc.serviceConfig svc)) //
     (fetch-prestart name svc) //
     (fetch-start    name svc) //
     (fetch-finish   name svc) //
     {};
   in
   # only longrun for now
+  if serv.type == "longrun" then make-longrun name serv
+  else if serv.type == "oneshot" then make-oneshot name serv
+  else throw "cannot create service for type [${serv.type}/${serv.Type}]";
+
+  make-oneshot = name: serv:
+  {
+    name = name;
+    type = serv.type;
+    up = ''
+      #!/bin/sh
+
+    ''
+    +
+    (make-environment serv)
+    +
+    ''
+      # ExecStart
+      exec ${serv.start}
+    '';
+
+    # TODO: make down based on ExecStop... tags.
+    #down = ''
+    #  #!/bin/sh
+    #
+    #  exit 0
+    #'';
+  };
+
+  make-environment = serv:
+    (if hasAttr "environment" serv then
+    ''
+      # Environment
+    ''
+    +
+    (concatStringsSep ""
+      (map (key: ''
+        export ${key}
+        ${key}=${serv.environment.${key}}
+      '') (attrNames serv.environment)))
+    else ''
+      # Use a simple default path. Don't export.
+      PATH=${pkgs.coreutils}/bin:
+    '');
+
+  make-longrun = name: serv:
   {
     name = name;
     type = serv.type;
@@ -109,15 +154,9 @@ rec {
 
     ''
     +
-    (if hasAttr "environment" serv then
-    (concatStringsSep ""
-      (map (key: ''
-        export ${key}=${serv.environment.${key}}
-      '') (attrNames serv.environment)))
-    else ''
-      # Use a simple default path. Don't export.
-      PATH=${pkgs.coreutils}/bin:
-    '')
+
+    # Environment
+    (make-environment serv)
     +
 
     # PreStart
