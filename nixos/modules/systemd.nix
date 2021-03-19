@@ -10,25 +10,33 @@ in
 
 rec {
 
-  make-type = name: svc:
+  fetch-type = name: svc:
   let
     Type = if hasAttr "Type" svc then svc.Type else                     # take Type if it specfied
            if hasAttr "BusName" svc then "dbus" else                    # when there is no BusName ...
            if hasAttr "ExecStart" svc.serviceConfig then "simple" else  # ... default to simple when ExecStart present
            "oneshot"; # default when neither Type nor Execstart are specified (and neither BusName)
   in
-  if elem Type [ "simple" "exec" "forking" ] # TODO: add other types
+  if elem Type [ "simple" "exec" "forking" ]
   then
   {
     inherit Type;      # keep for later to detemine other flags
     type =  "longrun"; # s6-type
   }
-  else throw ("cannot process systemd sevice of type [${Type}] for [${name}]");
+  #else (if elem Type [ "oneshot" ]
+  #then
+  #{
+  #  inherit Type;
+  #  type = "oneshot";
+  #}
+  else throw ("cannot process systemd sevice of type [${Type}] for [${name}]")
+  #)
+  ;
 
 
   # The executable text can start with a 'special prefix'.
   # It can lead to multiple attributes, eg 'start', 'ps-name', etc
-  make-start = name: svc:
+  fetch-start = name: svc:
   let
     # TODO: handle multiple lines. Note, these might have their own prefixes. Arrrgh.
     text = if isString svc.serviceConfig.ExecStart
@@ -53,15 +61,19 @@ rec {
   };
 
 
-  make-prestart = name: svc:
+  fetch-prestart = name: svc:
   # if there is a preStart, create a dependency on it
   (if hasAttr "preStart" svc then { preStart = svc.preStart; } else {});
 
-  make-finish = name: svc:
+  fetch-finish = name: svc:
   # if there is an ExecPostStop command, capture that.
   # TODO: filter special characters
   # TODO: fetch other ExecStop commands too
   (if hasAttr "ExecStopPost" svc.serviceConfig then { finish = svc.serviceConfig.ExecStopPost; } else {});
+
+  fetch-env = name: svc:
+  (if hasAttr "environment" svc then { environment = svc.environment; } else {});
+
 
   # make-prestart = name: svc:
   # # If there is a preStart, create a new one-shot service to set it up
@@ -78,41 +90,64 @@ rec {
 
 
   # Convert a systemd service definition into one or more s6-services.
-  # We split the preStart into a separate
   convert-service = name: svc:
   let serv =
-    make-type     name svc //
-    make-start    name svc //
-    make-prestart name svc //
-    make-finish   name svc //
+    (fetch-type     name svc) //
+    (fetch-env      name (trace (dump svc.environment) svc)) //
+    (fetch-prestart name svc) //
+    (fetch-start    name svc) //
+    (fetch-finish   name svc) //
     {};
   in
   # only longrun for now
   {
-    name = trace (dump serv) name;
+    name = name;
     type = serv.type;
+    #environment = serv.environment; # TODO: set environment in the s6-service
     run = ''
       #!/bin/sh
 
-      # don't export
+    ''
+    +
+    (if hasAttr "environment" serv then
+    (concatStringsSep ""
+      (map (key: ''
+        export ${key}=${serv.environment.${key}}
+      '') (attrNames serv.environment)))
+    else ''
+      # Use a simple default path. Don't export.
       PATH=${pkgs.coreutils}/bin:
+    '')
+    +
 
+    # PreStart
+    (if hasAttr "preStart" serv then
+    ''
       # PreStart
-      ${if hasAttr "preStart" serv then serv.preStart else ""}
+      ${serv.preStart}
+    ''
+    else "") +
 
+    # ExecStart
+    # TODO: ps-name:  ${if hasAttr "ps-name" then "${pkgs.execline}/bin/exec -a ${serv.ps-name}"}
+    ''
       # ExecStart
       exec ${serv.start}
     '';
-    # TODO: ps-name:  ${if hasAttr "ps-name" then "${pkgs.execline}/bin/exec -a ${serv.ps-name}"}
   } //
+
+  # add the finish script
   (if hasAttr "finish" serv then
   {
     finish = ''
       #!/bin/sh
 
+      # TODO: Add environment
+
       ${serv.finish}
     '';
-  } else {});
+  } else {}) //
 
+  {};
 
 }
