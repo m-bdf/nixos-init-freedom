@@ -6,6 +6,7 @@ with builtins;
 
 let
   dump = import ./dump.nix;
+  dumpit = x : trace (dump x) x;
 in
 
 rec {
@@ -37,6 +38,9 @@ rec {
   # The executable text can start with a 'special prefix'.
   # It can lead to multiple attributes, eg 'start', 'ps-name', etc
   fetch-start = name: svc:
+  if ! hasAttr "ExecStart" svc.serviceConfig then
+  throw "Cannot process [${name}], no [ExecStart] present"
+  else
   let
     # TODO: handle multiple lines. Note, these might have their own prefixes. Arrrgh.
     text = if isString svc.serviceConfig.ExecStart
