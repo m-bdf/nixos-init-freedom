@@ -5,7 +5,10 @@ with builtins;
 
 let
   cfg = config.services.s6-init;
+
   dump = import ./dump.nix;
+  dumpit = x: trace (dump x) x;
+
   systemd = import ./systemd.nix { pkgs =  pkgs; };
 
 
@@ -69,7 +72,6 @@ in {
     let
 
       s6-init = pkgs.writeScript "s6-init"
-
       (let
           scanner = pkgs.writeScript "system-svscan" ''
             #!${pkgs.execline}/bin/execlineb -P
@@ -128,6 +130,20 @@ in {
 
               ${pkgs.s6}/bin/s6-setsid \
               ${pkgs.utillinux}/bin/agetty -a root tty8 linux
+            '';
+          };
+
+          nix-daemon = rec {
+            name = "nix-daemon";
+            type = "longrun";
+            run = ''
+              #!${pkgs.execline}/bin/execlineb -P
+
+              ${pkgs.execline}/bin/exec -c                                     # clear environment
+              #${pkgs.s6}/bin/s6-envdir -I /service/.s6-svscan/env              # read env (optional)
+              ${pkgs.s6}/bin/s6-setsid -qb
+              ${pkgs.execline}/bin/exec -a nix-daemon                          # name it 'nix-daemon' instead of /nix/store/...
+              ${pkgs.nix}/bin/nix-daemon --daemon
             '';
           };
 
