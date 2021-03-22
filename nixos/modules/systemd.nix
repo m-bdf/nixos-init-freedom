@@ -78,6 +78,21 @@ rec {
   fetch-env = name: svc:
   (if hasAttr "environment" svc then { environment = svc.environment; } else {});
 
+  fetch-dependencies = name: svc:
+  let
+    fetch = attr: if hasAttr attr svc then svc.${attr} else [];
+  in
+  {
+    wants = fetch "wants";
+    requires = fetch "requires";
+    requisite = fetch "requisite";
+    binds-to = fetch "bindsTo";
+    part-of = fetch "partOf";
+    conflicts = fetch "conflicts";
+    before = fetch "before";
+    after = fetch "after";
+    required-by = fetch "requiredBy";
+  };
 
   # make-prestart = name: svc:
   # # If there is a preStart, create a new one-shot service to set it up
@@ -92,18 +107,17 @@ rec {
   #     '';
   # };
 
-
   # Convert a systemd service definition into one or more s6-services.
   convert-service = name: svc:
   let serv =
     (fetch-type     name svc) //
-    (fetch-env      name (trace svc.serviceConfig svc)) //
+    (fetch-env      name svc) //
     (fetch-prestart name svc) //
     (fetch-start    name svc) //
     (fetch-finish   name svc) //
+    (fetch-dependencies name svc) //
     {};
   in
-  # only longrun for now
   if serv.type == "longrun" then make-longrun name serv
   else if serv.type == "oneshot" then make-oneshot name serv
   else throw "cannot create service for type [${serv.type}/${serv.Type}]";
@@ -115,11 +129,9 @@ rec {
     up = ''
       #!/bin/sh
 
-    ''
-    +
-    (make-environment serv)
-    +
-    ''
+      # Environment
+      ${make-environment serv}
+
       # ExecStart
       exec ${serv.start}
     '';
@@ -132,22 +144,6 @@ rec {
     #'';
   };
 
-  make-environment = serv:
-    (if hasAttr "environment" serv then
-    ''
-      # Environment
-    ''
-    +
-    (concatStringsSep ""
-      (map (key: ''
-        export ${key}
-        ${key}=${serv.environment.${key}}
-      '') (attrNames serv.environment)))
-    else ''
-      # Use a simple default path. Don't export.
-      PATH=${pkgs.coreutils}/bin:
-    '');
-
   make-longrun = name: serv:
   {
     name = name;
@@ -156,13 +152,11 @@ rec {
     run = ''
       #!/bin/sh
 
+      # Environment
+      ${make-environment serv}
+
     ''
     +
-
-    # Environment
-    (make-environment serv)
-    +
-
     # PreStart
     (if hasAttr "preStart" serv then
     ''
@@ -192,5 +186,17 @@ rec {
   } else {}) //
 
   {};
+
+  make-environment = serv:
+    (if hasAttr "environment" serv then
+    (concatStringsSep ""
+    (map (key: ''
+      export ${key}
+      ${key}=${serv.environment.${key}}
+    '') (attrNames serv.environment)))
+    else ''
+      # Use a simple default path. Don't export.
+      PATH=${pkgs.coreutils}/bin:
+    '');
 
 }
