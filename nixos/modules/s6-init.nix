@@ -88,7 +88,7 @@ in {
           '';
 
           logger-service = rec {
-            name = "syslog-logger-service";
+            name = "logger-service";
             type = "longrun";
             run = ''
               #!${pkgs.execline}/bin/execlineb -P
@@ -103,6 +103,7 @@ in {
           date-service =  rec {
             name = "date-service";
             type = "longrun";
+            dependencies = [ "logger-service" ];
             run = ''
               #!/bin/sh
 
@@ -113,6 +114,7 @@ in {
           log-tailer = rec {
             name = "log-tailer";
             type = "longrun";
+            dependencies = [ "logger-service" ];
             run = ''
               #!/bin/sh
 
@@ -125,6 +127,7 @@ in {
           getty-service = rec {
             name = "getty-service";
             type = "longrun";
+            dependencies = []; # don't depend on anything, it's a backup entry into the system.
             run = ''
               #!/bin/sh
 
@@ -136,6 +139,7 @@ in {
           nix-daemon = rec {
             name = "nix-daemon";
             type = "longrun";
+            dependencies = [ "logger-service" ];
             run = ''
               #!${pkgs.execline}/bin/execlineb -P
 
@@ -147,37 +151,52 @@ in {
             '';
           };
 
-          #console-getty = systemd.convert-service "console-getty" config.systemd.services.console-getty;
-          #haveged = systemd.convert-service "haveged" config.systemd.services.haveged;
-
-          # convert the specified services into s6-services
-          #systemd-imports = [ "console-getty" "haveged" "unbound" "sshd" "network-setup" ];
-          systemd-imports = [                                             "network-setup" ];
+          # Reject these systemd-defined services. These create too much trouble.
+          # Feel free to create s6 replacements using the same names and add these to `startup-services`
           systemd-rejects =
-            [ "dbus" "nix-daemon" "polkit" "systemd-backlight@" "systemd-fsck@"
+            [ "dbus" "polkit" "nscd"
+              "nix-daemon" "nix-gc" "nix-optimise"
+              "systemd-backlight@" "systemd-fsck@" "systemd-importd" "systemd-journal-flush" "systemd-journald"
+              "systemd-logind" "systemd-modules-load" "systemd-random-seed" "systemd-remount-fs" "systemd-sysctl"
+              "systemd-timedated" "systemd-udev-settle" "systemd-udevd"
+              "systemd-nspawn@" "serial-getty@" "container-getty@" "getty@"
+              "qemu-guest-agent" "prepare-kexec" "save-hwclock"
+              "pre-sleep" "post-resume"
               "halt.target" "shutdown.target" "sleep.target"
+              "container@"
+              "zpool-trim"
             ];
-          systemd-services = map (svc-name: systemd.convert-service svc-name config.systemd.services.${svc-name})
-            (filter (svc-name:   elem svc-name systemd-imports)
-            (filter (svc-name: ! elem svc-name systemd-rejects) (attrNames config.systemd.services
-            )
-            ));
 
-            startup-services = [ logger-service log-tailer date-service getty-service ] ++
-            #(trace (dump systemd-services)
-            systemd-services
-            #)
-            ;
+          # Filter out the ones we don't want, keep the ones that are well behaved.
+          systemd-services = map (svc-name: systemd.convert-service svc-name config.systemd.services.${svc-name})
+            # filter out explicit rejected services
+            (filter (svc-name: ! elem svc-name systemd-rejects) (dumpit(attrNames config.systemd.services)
+
+            # filter out empty serviceConfig
+            (filter (svc-name: config.systemd.services.${svc-name}.serviceConfig != {})
+            )));
+
+          # Use these services at startup.
+          startup-services = [ logger-service log-tailer date-service getty-service nix-daemon ] ++ systemd-services;
+
+          make-dependencies = svc: dir:
+            if hasAttr "dependencies" svc && svc.dependencies != [] then ''
+              cat << 'EOF-XYZZY' > "${dir}/dependencies"
+              ${concatStringsSep "\n" svc.dependencies}
+              EOF-XYZZY
+            ''
+            else "";
 
           make-service = svc:
-            if svc.type == "longrun" then
-              make-longrun svc
-            else make-oneshot svc;
-
-          make-oneshot = svc:
           let
-            dir = "${cfg.serviceDir}/${svc.name}";
+            s = dumpit svc;
+            dir = "${cfg.serviceDir}/${s.name}";
           in
+            if svc.type == "longrun" then
+              make-longrun svc dir
+            else make-oneshot svc dir;
+
+          make-oneshot = svc: dir:
           ''
             # Make oneshot ${svc.name}
             mkdir -p ${dir}
@@ -186,12 +205,12 @@ in {
             EOF-XYZZY
             chmod +x ${dir}/up
             echo ${svc.type} > ${dir}/type
-          '';
+          ''
+          +
+          # add dependencies
+          make-dependencies svc dir;
 
-          make-longrun = svc:
-          let
-            dir = "${cfg.serviceDir}/${svc.name}";
-          in
+          make-longrun = svc: dir:
           ''
             # Make service ${svc.name}
             mkdir -p ${dir}
@@ -200,7 +219,11 @@ in {
             EOF-XYZZY
             chmod +x ${dir}/run
             echo ${svc.type} > ${dir}/type
-          '' +
+          ''
+          +
+          # add dependencies
+          (make-dependencies svc dir)
+          +
           # add a finish script
           (if hasAttr "finish" svc then
           ''
