@@ -169,15 +169,48 @@ in {
 
           # Filter out the ones we don't want, keep the ones that are well behaved.
           systemd-services = map (svc-name: systemd.convert-service svc-name config.systemd.services.${svc-name})
-            # filter out explicit rejected services
-            (filter (svc-name: ! elem svc-name systemd-rejects) (dumpit(attrNames config.systemd.services)
+            # filter out explicit rejected services ...
+            (filter (svc-name: ! elem svc-name systemd-rejects)
 
-            # filter out empty serviceConfig
+            # filter out empty serviceConfig ...
             (filter (svc-name: config.systemd.services.${svc-name}.serviceConfig != {})
-            )));
+
+            # ... from these services
+            #(dumpit(
+              (attrNames config.systemd.services)
+            #)
+            ));
 
           # Use these services at startup.
           startup-services = [ logger-service log-tailer date-service getty-service nix-daemon ] ++ systemd-services;
+
+          # Missing dependencies are services specified in service dependencies but are not defined in `startup-services`.
+          missing-dependencies =
+            let
+              all-deps = concatLists (map (svc: if hasAttr "dependencies" svc then svc.dependencies else []) startup-services);
+              sort-deps = sort (a: b: a < b) all-deps;
+              uniq-deps = lib.lists.unique sort-deps;
+            in
+            filter (x: ! elem x (map (s: s.name) startup-services)) uniq-deps;
+
+          # Create a oneshot service with empty `up` and `down` scripts to satisfy the missing depencencies.
+          # If you need other behaviour, create a service and add it to `startup-services`.
+          make-missing-dependency = missing:
+          {
+            name = missing;
+            type = "oneshot";
+            up = ''
+              #!/bin/sh
+
+              exit 0
+            '';
+            down = ''
+              #!/bin/sh
+
+              exit 0
+            '';
+          };
+
 
           make-dependencies = svc: dir:
             if hasAttr "dependencies" svc && svc.dependencies != [] then ''
@@ -189,8 +222,8 @@ in {
 
           make-service = svc:
           let
-            s = dumpit svc;
-            dir = "${cfg.serviceDir}/${s.name}";
+            #s = dumpit svc;
+            dir = "${cfg.serviceDir}/${svc.name}";
           in
             if svc.type == "longrun" then
               make-longrun svc dir
@@ -206,6 +239,14 @@ in {
             chmod +x ${dir}/up
             echo ${svc.type} > ${dir}/type
           ''
+          +
+          # add `down` script
+          (if hasAttr "down" svc then ''
+            cat << 'EOF-XYZZY' > ${dir}/down
+            ${svc.down}
+            EOF-XYZZY
+            chmod +x ${dir}/down
+        '' else "")
           +
           # add dependencies
           make-dependencies svc dir;
@@ -234,7 +275,9 @@ in {
           else "");
 
           make-services = servs:
-          builtins.concatStringsSep "\n" (builtins.map make-service servs);
+          (trace (dump (missing-dependencies))
+          builtins.concatStringsSep "\n"
+          (builtins.map make-service (servs ++ map make-missing-dependency missing-dependencies)));
 
       in
         ''
