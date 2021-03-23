@@ -125,6 +125,7 @@ rec {
   {
     name = "${name}.service";
     type = serv.type;
+    dependencies = make-dependencies name serv;
     up = ''
       #!/bin/sh
 
@@ -148,6 +149,7 @@ rec {
     name = "${name}.service";
     type = serv.type;
     #environment = serv.environment; # TODO: set environment in the s6-service
+    dependencies = make-dependencies name serv;
     run = ''
       #!/bin/sh
 
@@ -197,5 +199,9 @@ rec {
       # Use a simple default path. Don't export.
       PATH=${pkgs.coreutils}/bin:
     '');
+
+  make-dependencies = name: serv:
+  builtins.concatLists [ serv.wants serv.requires serv.requisite serv.binds-to serv.part-of serv.after ];
+
 
 }
