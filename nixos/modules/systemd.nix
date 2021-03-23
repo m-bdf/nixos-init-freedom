@@ -66,7 +66,6 @@ rec {
 
 
   fetch-prestart = name: svc:
-  # if there is a preStart, create a dependency on it
   (if hasAttr "preStart" svc then { preStart = svc.preStart; } else {});
 
   fetch-finish = name: svc:
@@ -124,7 +123,7 @@ rec {
 
   make-oneshot = name: serv:
   {
-    name = name;
+    name = "${name}.service";
     type = serv.type;
     up = ''
       #!/bin/sh
@@ -146,7 +145,7 @@ rec {
 
   make-longrun = name: serv:
   {
-    name = name;
+    name = "${name}.service";
     type = serv.type;
     #environment = serv.environment; # TODO: set environment in the s6-service
     run = ''
