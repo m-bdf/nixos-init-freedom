@@ -151,6 +151,52 @@ in {
             '';
           };
 
+          network-target = rec {
+            name = "network.target";
+            type = "oneshot";
+            dependencies = [ "logger-service" ];
+            up = ''
+              #!${pkgs.execline}/bin/execlineb -P
+
+              foreground { ${pkgs.iproute}/bin/ip address add 127.0.0.1 dev lo }
+              foreground { ${pkgs.iproute}/bin/ip link set lo up }
+
+              # address is set by network-...eth0
+              foreground { ${pkgs.iproute}/bin/ip link set eth0 up }
+            '';
+            down = ''
+              #!${pkgs.execline}/bin/execlineb -P
+
+              foreground { ${pkgs.iproute}/bin/ip link set eth0 down }
+              foreground { ${pkgs.iproute}/bin/ip link set lo down }
+            '';
+          };
+
+          # failing-oneshot = rec {
+          #   name = "failing-oneshot";
+          #   type = "oneshot";
+          #   dependencies = [ "logger-service" ];
+          #   up = ''
+          #     #!${pkgs.execline}/bin/execlineb -P
+          #
+          #     foreground { ${pkgs.coreutils}/bin/echo "Failing oneshot fails" }
+          #
+          #     exit 100
+          #   '';
+          # };
+
+          # failing-service = rec {
+          #   name = "failing-service";
+          #   type = "longrun";
+          #   dependencies = [ "logger-service" "failing-oneshot" ];
+          #   run = ''
+          #     #!${pkgs.execline}/bin/execlineb -P
+          #
+          #     foreground { ${pkgs.coreutils}/bin/echo "Expect not to get started due to failing-oneshot" }
+          #     ${pkgs.coreutils}/bin/sleep 123456
+          #   '';
+          # };
+
           # Reject these systemd-defined services. These create too much trouble.
           # Feel free to create s6 replacements using the same names and add these to `startup-services`
           systemd-rejects =
@@ -176,13 +222,15 @@ in {
             (filter (svc-name: config.systemd.services.${svc-name}.serviceConfig != {})
 
             # ... from these services
-            #(dumpit(
               (attrNames config.systemd.services)
-            #)
-            ));
+             ));
 
           # Use these services at startup.
-          startup-services = [ logger-service log-tailer date-service getty-service nix-daemon ] ++ systemd-services;
+          startup-services = [
+            logger-service log-tailer date-service getty-service nix-daemon
+            network-target # sets up lo and eth0
+            #failing-oneshot failing-service # test to see that failing-service does not get started
+          ] ++ systemd-services;
 
           # Missing dependencies are services specified in service dependencies but are not defined in `startup-services`.
           missing-dependencies =
@@ -210,7 +258,6 @@ in {
               exit 0
             '';
           };
-
 
           make-dependencies = svc: dir:
             if hasAttr "dependencies" svc && svc.dependencies != [] then ''
@@ -249,7 +296,8 @@ in {
         '' else "")
           +
           # add dependencies
-          make-dependencies svc dir;
+          (make-dependencies svc dir);
+
 
           make-longrun = svc: dir:
           ''
@@ -274,10 +322,21 @@ in {
           ''
           else "");
 
+          # make-environment = svc dir:
+          # (if hasAttr "environment" svc then
+          # (concatStringsSep ""
+          # (map (key: ''
+          #   export ${key}
+          #   ${key}=${svc.environment.${key}}
+          # '') (attrNames svc.environment)))
+          # else ''
+          #   # Use a simple default path. Don't export.
+          #   PATH=${pkgs.coreutils}/bin:
+          # '');
+
           make-services = servs:
-          (trace (dump (missing-dependencies))
           builtins.concatStringsSep "\n"
-          (builtins.map make-service (servs ++ map make-missing-dependency missing-dependencies)));
+          (builtins.map make-service (servs ++ map make-missing-dependency (dumpit missing-dependencies)));
 
       in
         ''
