@@ -1,0 +1,93 @@
+# Nixos Init Freedom
+
+This repository provides the code to create a NixOS system without systemd as pid 1.
+
+Instead it uses Skarnet's S6 init system.
+
+
+# How to use
+
+Clone:
+```
+   git clone https://sr.ht/~guido/nixos-init-freedom
+   git clone https://github.com/nh2/nixos-vm-building
+```
+
+In your `configutation.nix` add these sections:
+
+```
+   import = [
+     <path-to>/nixos-init-freedom/s6-init.nix
+   ];
+```
+
+and
+```
+   # Get me a decent init system!
+   services.s6-init.enable = true;
+```
+
+Then build and run it in a virtual machine.
+
+```
+   export export QEMU_NET_OPTS='net=192.168.76.0/24'
+   ln -s ../vm-building/vm.nix
+   ../vm-building/build-vm.sh && ./result/bin/run-*-vm
+```
+
+From within the VM,
+
+```
+   ps axf | head  # and see who is running at PID 1.
+```
+
+
+# Why
+
+Why?
+
+1. Because I can;
+
+2. Because I like the power of Nix(OS);
+
+3. I dislike the way systemd operates.
+
+
+
+# How it works
+
+Actually, getting rid of systemd as PID 1 is easy, NixOS has a hook at
+the end of the shell script that starts the system. In file
+`s6-init.nix` I set `boot.systemdExecutable = "${s6-init}";` This
+script sets up the services to starts `s6-svscan`.
+
+The services it starts are:
+
+- s6-log to capture all logging to /var/log/s6/syslog/current;
+
+- a tail -F on tty2;
+
+- a getty on tty8 (autologin, so no passwords needed);
+
+- a nix-daemon (not tested);
+
+- a one-shot script to enable lo and eth0 interface (hardcoded);
+
+- and the system specified services such as `unbound` and `sshd`.
+
+## systemd services
+
+The goal is have freedom from systemd but keep all the work that has
+already been done.
+
+As such, the file `systemd.nix` contains the logic to create an
+s6-service definition from the global config variable. -- That's the
+power of NixOS, I don't have to parse the
+`/etc/systemd/system/<service>` files. :-)
+
+For now I've tested it with `unbound` and `sshd`, other services may
+work too.
+
+To make these work I create 'empty' one-shot services that just do
+`exit 0` for each missing dependency.
+
