@@ -148,7 +148,6 @@ rec {
   {
     name = "${name}.service";
     type = serv.type;
-    #environment = serv.environment; # TODO: set environment in the s6-service
     dependencies = make-dependencies name serv;
     run = ''
       #!/bin/sh
@@ -202,6 +201,6 @@ rec {
 
   make-dependencies = name: serv:
   builtins.concatLists [ serv.wants serv.requires serv.requisite serv.binds-to serv.part-of serv.after ];
-
+  # TODO: use serv.before too. It requires a reverse dependency.
 
 }

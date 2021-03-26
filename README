@@ -38,7 +38,7 @@ Then build and run it in a virtual machine.
 From within the VM,
 
 ```
-   ps axf | head  # and see who is running at PID 1.
+   ps ax | head  # and see who is running at PID 1.
 ```
 
 
