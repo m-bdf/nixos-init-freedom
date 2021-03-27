@@ -9,7 +9,7 @@ let
   dump = import ./dump.nix;
   dumpit = x: trace (dump x) x;
 
-  systemd = import ./systemd.nix { pkgs =  pkgs; };
+  systemd = import ./systemd.nix { pkgs =  pkgs; lib = lib; };
 
 
 in {

@@ -1,6 +1,6 @@
 # Functions to convert a systemd service unit to a s6 service definition
 # ----------------------------------------------------------------------
-{pkgs, ... }:
+{pkgs, lib, ... }:
 
 with builtins;
 
@@ -200,7 +200,7 @@ rec {
     '');
 
   make-dependencies = name: serv:
-  builtins.concatLists [ serv.wants serv.requires serv.requisite serv.binds-to serv.part-of serv.after ];
+  lib.lists.unique (concatLists [ serv.wants serv.requires serv.requisite serv.binds-to serv.part-of serv.after ]);
   # TODO: use serv.before too. It requires a reverse dependency.
 
 }
