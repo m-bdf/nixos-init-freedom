@@ -199,13 +199,11 @@ in {
 
           # Reject these systemd-defined services. These create too much trouble.
           # Feel free to create s6 replacements using the same names and add these to `startup-services`
-          systemd-rejects =
+          systemd-rejects = concatStringsSep "|"
             [ "dbus" "polkit" "nscd"
               "nix-daemon" "nix-gc" "nix-optimise"
-              "systemd-backlight@" "systemd-fsck@" "systemd-importd" "systemd-journal-flush" "systemd-journald"
-              "systemd-logind" "systemd-modules-load" "systemd-random-seed" "systemd-remount-fs" "systemd-sysctl"
-              "systemd-timedated" "systemd-udev-settle" "systemd-udevd"
-              "systemd-nspawn@" "serial-getty@" "container-getty@" "getty@"
+              "systemd-.*"
+              "serial-getty@" "container-getty@" "getty@"
               "qemu-guest-agent" "prepare-kexec" "save-hwclock"
               "pre-sleep" "post-resume"
               "halt.target" "shutdown.target" "sleep.target"
@@ -216,7 +214,8 @@ in {
           # Filter out the ones we don't want, keep the ones that are well behaved.
           systemd-services = map (svc-name: systemd.convert-service svc-name config.systemd.services.${svc-name})
             # filter out explicit rejected services ...
-            (filter (svc-name: ! elem svc-name systemd-rejects)
+            # note builtins.match returns [] on match, null on no match
+            (filter (svc-name: (match systemd-rejects svc-name) == null)
 
             # filter out empty serviceConfig ...
             (filter (svc-name: config.systemd.services.${svc-name}.serviceConfig != {})
