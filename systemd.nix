@@ -7,6 +7,7 @@ with builtins;
 let
   dump = import ./dump.nix;
   dumpit = x : trace (dump x) x;
+  dumplabel = l: x: trace (dump [ l x ]) x;
 in
 
 rec {
@@ -18,7 +19,7 @@ rec {
            if hasAttr "ExecStart" svc.serviceConfig then "simple" else          # ... default to simple when ExecStart present
            "oneshot"; # default when neither Type nor Execstart are specified (and neither BusName)
   in
-  if elem Type [ "simple" "exec" "forking" ]
+  if elem Type [ "simple" "exec" "forking" "notify" ]
   then
   {
     inherit Type;      # keep for later to detemine other flags
@@ -30,7 +31,7 @@ rec {
     inherit Type;
     type = "oneshot";
   }
-  else throw ("cannot process systemd sevice of type [${Type}] for [${name}]")
+  else throw (trace (dump svc.serviceConfig) "cannot process systemd sevice of type [${Type}] for [${name}]")
   )
   ;
 
@@ -108,7 +109,8 @@ rec {
 
   # Convert a systemd service definition into one or more s6-services.
   convert-service = name: svc:
-  let serv =
+  let
+    serv =
     (fetch-type     name svc) //
     (fetch-env      name svc) //
     (fetch-prestart name svc) //
@@ -169,7 +171,7 @@ rec {
     # TODO: ps-name:  ${if hasAttr "ps-name" then "${pkgs.execline}/bin/exec -a ${serv.ps-name}"}
     ''
       # ExecStart
-      exec ${serv.start}
+      exec ${pkgs.s6}/bin/s6-setsid -qb ${serv.start}
     '';
   } //
 
