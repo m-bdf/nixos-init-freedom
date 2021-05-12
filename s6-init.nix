@@ -10,7 +10,7 @@ let
   dumpit = x: trace (dump x) x;
   dumplabel = l: x: trace (dump [ l x ]) x;
 
-  systemd = import ./systemd.nix { pkgs =  pkgs; lib = lib; };
+  systemd = import ./systemd-to-s6.nix { pkgs =  pkgs; lib = lib; };
 
 
 in {
