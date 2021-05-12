@@ -8,6 +8,7 @@ let
 
   dump = import ./dump.nix;
   dumpit = x: trace (dump x) x;
+  dumplabel = l: x: trace (dump [ l x ]) x;
 
   systemd = import ./systemd.nix { pkgs =  pkgs; lib = lib; };
 
@@ -97,17 +98,6 @@ in {
               ${pkgs.execline}/bin/redirfd -r 0 ${cfg.fifo}                  # open fifo and pass it as stdin to s6-log
               ${pkgs.execline}/bin/exec -a s6-log                            # name it 's6-log' instead of /nix/store/...
               ${pkgs.s6}/bin/s6-log -v -b -l 1024 T n30 s10000000 ${cfg.syslogDir}
-            '';
-          };
-
-          date-service =  rec {
-            name = "date-service";
-            type = "longrun";
-            dependencies = [ "logger-service" ];
-            run = ''
-              #!/bin/sh
-
-              while ${pkgs.coreutils}/bin/sleep 5 ; do ${pkgs.coreutils}/bin/date ; done
             '';
           };
 
@@ -207,7 +197,7 @@ in {
               "qemu-guest-agent" "prepare-kexec" "save-hwclock"
               "pre-sleep" "post-resume"
               "halt.target" "shutdown.target" "sleep.target"
-              "container@"
+              "container@"  # reject `container@` but accept `container@some-service`
               "zpool-trim"
             ];
 
@@ -226,9 +216,8 @@ in {
 
           # Use these services at startup.
           startup-services = [
-            logger-service log-tailer date-service getty-service nix-daemon
+            logger-service log-tailer getty-service nix-daemon
             network-target # sets up lo and eth0
-            #failing-oneshot failing-service # test to see that failing-service does not get started
           ] ++ systemd-services;
 
           # Missing dependencies are services specified in service dependencies but are not defined in `startup-services`.
@@ -268,8 +257,11 @@ in {
 
           make-service = svc:
           let
-            #s = dumpit svc;
-            dir = "${cfg.serviceDir}/${svc.name}";
+            s = dumplabel "make-service" svc;
+            #dir = (trace (dump ["attrnames" (attrNames s)]) "${cfg.serviceDir}/${s.name}");
+            #dir = "${cfg.serviceDir}/${s.name}";
+            dir = "${cfg.serviceDir}/${s.name}";
+
           in
             if svc.type == "longrun" then
               make-longrun svc dir
@@ -335,7 +327,7 @@ in {
 
           make-services = servs:
           builtins.concatStringsSep "\n"
-          (builtins.map make-service (servs ++ map make-missing-dependency (dumpit missing-dependencies)));
+          (builtins.map make-service (servs ++ map make-missing-dependency (dumplabel "missing-dependencies" missing-dependencies)));
 
       in
         ''
