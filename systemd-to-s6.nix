@@ -8,6 +8,15 @@ let
   dump = import ./dump.nix;
   dumpit = x : trace (dump x) x;
   dumplabel = l: x: trace (dump [ l x ]) x;
+
+  # mapSL: iterate a function over a list where the list can be an atom
+  # mapSL (x: x+2) [ 1 2 ] -> [ 3 4 ]
+  # mapSL (x: x+2) 3       -> [ 5 ]
+  mapSL = f: l:
+  if isList l
+  then map f l
+  else [ (f l) ];
+
 in
 
 rec {
@@ -15,8 +24,8 @@ rec {
   fetch-type = name: svc:
   let
     Type = if hasAttr "Type" svc.serviceConfig then svc.serviceConfig.Type else # take Type if it specfied
-           if hasAttr "BusName" svc then "dbus" else                            # when there is no BusName ...
-           if hasAttr "ExecStart" svc.serviceConfig then "simple" else          # ... default to simple when ExecStart present
+           if hasAttr "BusName" svc then "dbus" else                            # check for dbus busnames
+           if hasAttr "ExecStart" svc.serviceConfig then "simple" else          # default to simple when ExecStart present
            "oneshot"; # default when neither Type nor Execstart are specified (and neither BusName)
   in
   if elem Type [ "simple" "exec" "forking" "notify" ]
@@ -34,7 +43,6 @@ rec {
   else throw (trace (dump svc.serviceConfig) "cannot process systemd sevice of type [${Type}] for [${name}]")
   )
   ;
-
 
   # The executable text can start with a 'special prefix'.
   # It can lead to multiple attributes, eg 'start', 'ps-name', etc
@@ -94,19 +102,6 @@ rec {
     required-by = fetch "requiredBy";
   };
 
-  # make-prestart = name: svc:
-  # # If there is a preStart, create a new one-shot service to set it up
-  # {
-  #   name = "${name}-prestart";
-  #   type = "oneshot";
-  #   start =
-  #     ''
-  #       #!/bin/sh -e
-
-  #       ${svc.preStart}
-  #     '';
-  # };
-
   # Convert a systemd service definition into one or more s6-services.
   convert-service = name: svc:
   let
@@ -117,7 +112,7 @@ rec {
     (fetch-start    name svc) //
     (fetch-finish   name svc) //
     (fetch-dependencies name svc) //
-    {};
+    {systemd = svc; };
   in
   if serv.type == "longrun" then make-longrun name serv
   else if serv.type == "oneshot" then make-oneshot name serv
@@ -159,6 +154,11 @@ rec {
 
     ''
     +
+    ''
+      # make /run and /var/lib directories
+      ${make-directories serv}
+    ''
+    +
     # PreStart
     (if hasAttr "preStart" serv then
     ''
@@ -189,6 +189,7 @@ rec {
 
   {};
 
+
   make-environment = serv:
     (if hasAttr "environment" serv then
     (concatStringsSep ""
@@ -200,6 +201,30 @@ rec {
       # Use a simple default path. Don't export.
       PATH=${pkgs.coreutils}/bin:
     '');
+
+
+  make-directories = serv:
+  let
+    svc = trace (dump (attrNames serv.systemd.serviceConfig)) serv.systemd.serviceConfig;
+    fetch = attr: if hasAttr attr svc then svc.${attr} else [];
+    run-dirs =   dumplabel "run-dir"    (fetch "RuntimeDirectory");
+    run-mode =   dumplabel "run-mode"   (fetch "RuntimeDirectoryMode");
+    state-dirs = dumplabel "state-dir"  (fetch "StateDirectory");
+    state-mode = dumplabel "state-mode" (fetch "StateDirectoryMode");
+
+    make-dir = prefix: dir-name: dir-mode:
+    ''
+      mkdir -p ${make-mode dir-mode} ${prefix}/${dir-name}
+    '';
+
+    make-mode = dir-mode:
+      if dir-mode != []
+      then '' -m ${dir-mode} ''
+      else "";
+  in
+    (concatStringsSep "\n" (mapSL (dir: (make-dir "/run"     dir run-mode))   run-dirs))   +
+    (concatStringsSep "\n" (mapSL (dir: (make-dir "/var/lib" dir state-mode)) state-dirs)) ;
+
 
   make-dependencies = name: serv:
   lib.lists.unique (concatLists [ serv.wants serv.requires serv.requisite serv.binds-to serv.part-of serv.after ]);
