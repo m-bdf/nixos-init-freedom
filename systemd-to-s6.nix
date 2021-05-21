@@ -9,6 +9,9 @@ let
   dumpit = x : trace (dump x) x;
   dumplabel = l: x: trace (dump [ l x ]) x;
 
+  # utils
+  fetch = attr: svc: default: if hasAttr attr svc then svc.${attr} else default;
+
   # mapSL: iterate a function over a list where the list can be an atom
   # mapSL (x: x+2) [ 1 2 ] -> [ 3 4 ]
   # mapSL (x: x+2) 3       -> [ 5 ]
@@ -142,6 +145,12 @@ rec {
   };
 
   make-longrun = name: serv:
+  let
+    svc = trace (dump (attrNames serv.systemd.serviceConfig)) serv.systemd.serviceConfig;
+    user = fetch "User" svc "";
+    group = fetch "Group" svc ""; # not needed to change user?
+    change-user = if user != "" then "${pkgs.s6}/bin/s6-setuidgid ${user} " else "";
+  in
   {
     name = "${name}.service";
     type = serv.type;
@@ -152,18 +161,16 @@ rec {
       # Environment
       ${make-environment serv}
 
-    ''
-    +
-    ''
       # make /run and /var/lib directories
       ${make-directories serv}
+
     ''
     +
     # PreStart
     (if hasAttr "preStart" serv then
     ''
       # PreStart
-      ${serv.preStart}
+      ${change-user} ${serv.preStart}
     ''
     else "") +
 
@@ -171,7 +178,7 @@ rec {
     # TODO: ps-name:  ${if hasAttr "ps-name" then "${pkgs.execline}/bin/exec -a ${serv.ps-name}"}
     ''
       # ExecStart
-      exec ${pkgs.s6}/bin/s6-setsid -qb ${serv.start}
+      exec ${pkgs.s6}/bin/s6-setsid -qb ${change-user} ${serv.start}
     '';
   } //
 
@@ -206,21 +213,29 @@ rec {
   make-directories = serv:
   let
     svc = trace (dump (attrNames serv.systemd.serviceConfig)) serv.systemd.serviceConfig;
-    fetch = attr: if hasAttr attr svc then svc.${attr} else [];
-    run-dirs =   dumplabel "run-dir"    (fetch "RuntimeDirectory");
-    run-mode =   dumplabel "run-mode"   (fetch "RuntimeDirectoryMode");
-    state-dirs = dumplabel "state-dir"  (fetch "StateDirectory");
-    state-mode = dumplabel "state-mode" (fetch "StateDirectoryMode");
+    run-dirs =   dumplabel "run-dir"    (fetch "RuntimeDirectory"     svc []);
+    run-mode =   dumplabel "run-mode"   (fetch "RuntimeDirectoryMode" svc "");
+    state-dirs = dumplabel "state-dir"  (fetch "StateDirectory"       svc []);
+    state-mode = dumplabel "state-mode" (fetch "StateDirectoryMode"   svc "");
+    user = fetch "User" svc "";
+    group = fetch "Group" svc "";
 
     make-dir = prefix: dir-name: dir-mode:
     ''
       mkdir -p ${make-mode dir-mode} ${prefix}/${dir-name}
+      ${if user != ""
+      then "chown ${make-user-group} ${prefix}/${dir-name}"
+      else ""}
     '';
 
     make-mode = dir-mode:
       if dir-mode != []
       then '' -m ${dir-mode} ''
       else "";
+
+    make-user-group =
+      user + (if group != "" then ":${group}" else "");
+
   in
     (concatStringsSep "\n" (mapSL (dir: (make-dir "/run"     dir run-mode))   run-dirs))   +
     (concatStringsSep "\n" (mapSL (dir: (make-dir "/var/lib" dir state-mode)) state-dirs)) ;
