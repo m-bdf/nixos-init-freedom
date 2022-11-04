@@ -55,9 +55,9 @@ rec {
   else
   let
     # TODO: handle multiple lines. Note, these might have their own prefixes. Arrrgh.
-    text = if isString svc.serviceConfig.ExecStart
-    then svc.serviceConfig.ExecStart
-    else elemAt (svc.serviceConfig.ExecStart) 1; # ignore empty first line...
+    text = if isList svc.serviceConfig.ExecStart
+    then elemAt (svc.serviceConfig.ExecStart) 1 # ignore empty first line...
+    else toString svc.serviceConfig.ExecStart;
     first = substring 0 1 text;
     special = elem first [ "@"  "-"  ":"  "+"  "!" ];
     rest = if special

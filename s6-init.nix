@@ -208,7 +208,7 @@ in {
             (filter (svc-name: (match systemd-rejects svc-name) == null)
 
             # filter out empty serviceConfig ...
-            (filter (svc-name: config.systemd.services.${svc-name}.serviceConfig != {})
+            (filter (svc-name: config.systemd.services.${svc-name}.serviceConfig ? ExecStart)
 
             # ... from these services
               (attrNames config.systemd.services)
